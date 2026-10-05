@@ -1,7 +1,12 @@
 const $ = (id) => document.getElementById(id);
 
 // ---- 語言 ----
+// 路線頁面（由 tools/build-pages.js 產生）會先設定 window.PAGE：
+// { from, to, lang, base（回到網站根目錄的相對路徑）, alt（另一種語言的同一頁） }
+const page = () => window.PAGE || {};
+
 function initialLang() {
+  if (page().lang) return page().lang;
   try {
     const saved = localStorage.getItem('remit-lang');
     if (saved === 'zh' || saved === 'en') return saved;
@@ -30,6 +35,14 @@ const badgesOf = (m, dir) => (en() ? EN.methods[m.id].badges?.[dir] : METHOD_INF
 const useLabel = (u) => (en() ? EN.uses[u.id] : u.label);
 const dataDate = () =>
   new Date(DATA_UPDATED).toLocaleDateString(t().locale, { year: 'numeric', month: 'long', day: 'numeric' });
+
+// 路線頁面的網址，例如 taiwan-to-usa/、en/uk-to-taiwan/
+const SLUGS = { TW: 'taiwan', US: 'usa', CN: 'china', HK: 'hong-kong', SG: 'singapore', GB: 'uk', AU: 'australia' };
+const routePath = (from, to, language) => `${language === 'en' ? 'en/' : ''}${SLUGS[from]}-to-${SLUGS[to]}/`;
+const ROUTES = [
+  ...COUNTRIES.map((c) => [HOME, c]),
+  ...COUNTRIES.map((c) => [c, HOME]),
+];
 
 const SORTS = [
   { id: 'overall', label: () => t().sortOverall, cmp: (a, b) => b.score - a.score, top: (r) => t().points(r.score.toFixed(1)) },
@@ -128,9 +141,11 @@ const routeData = (q) => ({ from_code: q.from.code, to_code: q.to.code, amount_t
 // 使用者停止調整 2 秒後才算一次查詢，同樣的條件不重複記
 let searchTimer;
 let lastSearch = '';
+// 一打開就顯示的預設結果不算查詢，使用者動過條件才算
+let touched = false;
 function trackSearch(q) {
   clearTimeout(searchTimer);
-  if (!q.amount) return;
+  if (!touched || !q.amount) return;
   const data = { ...routeData(q), use_filter: state.use, sort: state.sort };
   const key = JSON.stringify(data);
   searchTimer = setTimeout(() => {
@@ -225,7 +240,7 @@ const detailId = () => new URLSearchParams(location.hash.slice(1)).get('m');
 function renderStatic() {
   const ui = t();
   document.documentElement.lang = en() ? 'en' : 'zh-Hant';
-  document.title = ui.pageTitle;
+  if (!window.PAGE) document.title = ui.pageTitle;
   $('title').textContent = ui.title;
   $('subtitle').textContent = ui.subtitle;
   $('offline-badge').textContent = ui.offline;
@@ -239,6 +254,9 @@ function renderStatic() {
   $('foot1').textContent = ui.foot1(dataDate());
   $('foot2').textContent = ui.foot2;
   $('disclaimer-text').textContent = en() ? EN.disclaimer : DISCLAIMER;
+  $('routes-title').textContent = ui.routesTitle;
+  $('routes').replaceChildren(...ROUTES.map(([from, to]) =>
+    el('a', { href: (page().base || '') + routePath(from.code, to.code, lang) }, ui.routeLink(placeName(from), placeName(to)))));
 
   for (const id of ['from', 'to']) {
     const picked = $(id).value;
@@ -258,6 +276,8 @@ function render() {
   const note = routeNote(c, q.dir);
   $('route-note').hidden = !note;
   $('route-note').textContent = note || '';
+  // 路線頁面的說明文字只對那一條路線有效，改了國家就收起來
+  if ($('intro')) $('intro').hidden = q.from.code !== page().from || q.to.code !== page().to || Boolean(detailId());
 
   const rows = METHODS
     .filter((m) => m[q.dir]?.countries.includes(c.code))
@@ -281,7 +301,7 @@ function render() {
     ...[{ id: 'all' }, ...USES].map((u) => {
       const btn = el('button', { type: 'button', className: 'chip' }, u.id === 'all' ? ui.allUses : useLabel(u));
       btn.setAttribute('aria-pressed', String(u.id === state.use));
-      btn.onclick = () => { state.use = u.id; render(); };
+      btn.onclick = () => { state.use = u.id; touched = true; render(); };
       return btn;
     }),
   );
@@ -294,7 +314,7 @@ function render() {
         el('small', {}, best ? s.top(best, q) : '—'));
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-selected', String(s.id === state.sort));
-      btn.onclick = () => { state.sort = s.id; render(); };
+      btn.onclick = () => { state.sort = s.id; touched = true; render(); };
       return btn;
     }),
   );
@@ -519,10 +539,11 @@ function onPick(changed) {
 function init() {
   renderStatic();
 
-  $('from').onchange = () => onPick('from');
-  $('to').onchange = () => onPick('to');
-  $('swap').onclick = () => setRoute($('to').value, $('from').value);
+  $('from').onchange = () => { touched = true; onPick('from'); };
+  $('to').onchange = () => { touched = true; onPick('to'); };
+  $('swap').onclick = () => { touched = true; setRoute($('to').value, $('from').value); };
   $('amount').oninput = () => {
+    touched = true;
     const n = readAmount();
     $('amount').value = n ? fmt(n) : '';
     render();
@@ -530,10 +551,16 @@ function init() {
   $('search').onsubmit = (e) => e.preventDefault();
   $('lang').onclick = () => {
     const amount = readAmount();
-    lang = en() ? 'zh' : 'en';
+    const next = en() ? 'zh' : 'en';
     try {
-      localStorage.setItem('remit-lang', lang);
+      localStorage.setItem('remit-lang', next);
     } catch { /* 存不下來就只在這次有效 */ }
+    // 路線頁面每種語言各有自己的網址，換語言就是換頁
+    if (page().alt) {
+      location.href = page().alt;
+      return;
+    }
+    lang = next;
     renderStatic();
     $('amount').value = amount ? fmt(amount) : '';
     render();
@@ -554,12 +581,13 @@ function init() {
 
   track('visit');
   loadCachedComments();
-  setRoute(HOME.code, state.other);
+  setRoute(page().from || HOME.code, page().to || state.other);
+  touched = false;
   refreshComments();
 
   // 讓網頁在沒有網路時也能開啟
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js');
+    navigator.serviceWorker.register(`${page().base || ''}sw.js`);
   }
 }
 
