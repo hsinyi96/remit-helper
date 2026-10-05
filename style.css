@@ -67,6 +67,20 @@ h1 {
   letter-spacing: 0.02em;
 }
 
+.lang {
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--header-text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.lang:hover { background: rgba(255, 255, 255, 0.12); }
+
 .offline-badge {
   background: #f2b84b;
   color: #3a2a00;

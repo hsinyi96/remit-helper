@@ -1,13 +1,42 @@
 const $ = (id) => document.getElementById(id);
+
+// ---- 語言 ----
+function initialLang() {
+  try {
+    const saved = localStorage.getItem('remit-lang');
+    if (saved === 'zh' || saved === 'en') return saved;
+  } catch { /* 讀不到就看瀏覽器語言 */ }
+  return navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+let lang = initialLang();
+const t = () => UI[lang];
+const en = () => lang === 'en';
 const fmt = (n, digits = 0) =>
-  n.toLocaleString('zh-TW', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  n.toLocaleString(t().locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
+// 資料檔裡的文字：中文在 data.js，英文在 data.en.js
+const placeName = (c) => (en() ? (c.code === HOME.code ? EN.home : EN.countries[c.code]).name : c.name);
+const curName = (c) => (en() ? (c.code === HOME.code ? EN.home : EN.countries[c.code]).curName : c.curName);
+const routeNote = (c, dir) => {
+  const key = dir === 'out' ? 'noteOut' : 'noteIn';
+  return en() ? EN.countries[c.code][key] : c[key];
+};
+const methodName = (m) => (en() ? EN.methods[m.id].name : m.name);
+const methodType = (m) => (en() ? EN.types[m.type] : m.type);
+const cfgText = (m, dir, field) => (en() ? EN.methods[m.id][dir][field] : m[dir][field]);
+const infoText = (m, field) => (en() ? EN.methods[m.id][field] : METHOD_INFO[m.id]?.[field]);
+const badgesOf = (m, dir) => (en() ? EN.methods[m.id].badges?.[dir] : METHOD_INFO[m.id]?.badges?.[dir]) || [];
+const useLabel = (u) => (en() ? EN.uses[u.id] : u.label);
+const dataDate = () =>
+  new Date(DATA_UPDATED).toLocaleDateString(t().locale, { year: 'numeric', month: 'long', day: 'numeric' });
 
 const SORTS = [
-  { id: 'overall', label: '整體推薦', cmp: (a, b) => b.score - a.score, top: (r) => `${r.score.toFixed(1)} 分` },
-  { id: 'receive', label: '收到最多', cmp: (a, b) => b.received - a.received, top: (r, q) => `${fmt(r.received)} ${q.to.cur}` },
-  { id: 'fee', label: '手續費最低', cmp: (a, b) => a.fees - b.fees || a.cost - b.cost, top: (r) => `NT$${fmt(r.fees)}` },
-  { id: 'fast', label: '最快到帳', cmp: (a, b) => a.cfg.hoursMin - b.cfg.hoursMin || a.cfg.hoursMax - b.cfg.hoursMax, top: (r) => r.cfg.speedText },
-  { id: 'popular', label: '最多人用', cmp: (a, b) => a.cfg.popularity - b.cfg.popularity, top: (r) => r.m.name },
+  { id: 'overall', label: () => t().sortOverall, cmp: (a, b) => b.score - a.score, top: (r) => t().points(r.score.toFixed(1)) },
+  { id: 'receive', label: () => t().sortReceive, cmp: (a, b) => b.received - a.received, top: (r, q) => `${fmt(r.received)} ${q.to.cur}` },
+  { id: 'fee', label: () => t().sortFee, cmp: (a, b) => a.fees - b.fees || a.cost - b.cost, top: (r) => `NT$${fmt(r.fees)}` },
+  { id: 'fast', label: () => t().sortFast, cmp: (a, b) => a.cfg.hoursMin - b.cfg.hoursMin || a.cfg.hoursMax - b.cfg.hoursMax, top: (r, q) => cfgText(r.m, q.dir, 'speedText') },
+  { id: 'popular', label: () => t().sortPopular, cmp: (a, b) => a.cfg.popularity - b.cfg.popularity, top: (r) => methodName(r.m) },
 ];
 
 const state = { sort: 'overall', use: 'all', comments: [], other: 'US' };
@@ -54,6 +83,12 @@ async function sendComment(comment) {
   if (!res.ok) throw new Error(await res.text());
 }
 
+// 留言的路線存成「TW-US」這種代碼，顯示時再換成目前語言的國名
+function routeLabel(route) {
+  const places = route.split('-').map((code) => [HOME, ...COUNTRIES].find((c) => c.code === code));
+  return places.length === 2 && places.every(Boolean) ? places.map(placeName).join(' → ') : route;
+}
+
 // ---- 匿名使用紀錄（只記路線、金額、點了什麼，不記姓名或聯絡方式） ----
 const EVENTS_URL = COMMENTS_URL.replace('/comments', '/events');
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -81,6 +116,7 @@ function track(type, data = {}) {
     body: JSON.stringify({
       visitor: visitorId(),
       type,
+      lang,
       device: innerWidth < 768 ? 'mobile' : 'desktop',
       ...data,
     }),
@@ -113,13 +149,15 @@ function spreadOf(cfg, c) {
 }
 
 function feePart(f, c, twd) {
+  if (f.only && !f.only.includes(c.code)) return 0;
   if (f.tiersUsd) {
     const tier = f.tiersUsd.find(([upTo]) => twd / USD_RATE <= upTo) || f.tiersUsd.at(-1);
     return tier[1] * USD_RATE + (f.fixed ?? 0);
   }
+  const local = (table) => (table?.[c.code] != null ? table[c.code] * c.rate : undefined);
   let pct = Math.min(Math.max(twd * (f.pct ?? 0), f.min ?? 0), f.max ?? Infinity);
-  if (f.maxCur) pct = Math.min(pct, f.maxCur[c.code] * c.rate);
-  return pct + (f.fixed ?? 0) + (f.fixedUsd ?? 0) * USD_RATE + (f.fixedCur ? f.fixedCur[c.code] * c.rate : 0);
+  pct = Math.min(Math.max(pct, local(f.minCur) ?? 0), local(f.maxCur) ?? Infinity);
+  return pct + (f.fixed ?? 0) + (f.fixedUsd ?? 0) * USD_RATE + (local(f.fixedCur) ?? 0);
 }
 
 // q：這次查詢 { dir, c（台灣以外的那個國家）, from, to, amount, twd }
@@ -183,14 +221,41 @@ function readQuery() {
 const usesOf = (r, q) => r.info.uses?.[q.dir] || [];
 const detailId = () => new URLSearchParams(location.hash.slice(1)).get('m');
 
+// 不會隨查詢改變的文字，換語言時重設一次
+function renderStatic() {
+  const ui = t();
+  document.documentElement.lang = en() ? 'en' : 'zh-Hant';
+  document.title = ui.title;
+  $('title').textContent = ui.title;
+  $('subtitle').textContent = ui.subtitle;
+  $('offline-badge').textContent = ui.offline;
+  $('lang').textContent = ui.switchTo;
+  $('from-label').textContent = ui.from;
+  $('to-label').textContent = ui.to;
+  $('swap').setAttribute('aria-label', ui.swap);
+  $('swap').title = ui.swap;
+  $('filters').setAttribute('aria-label', ui.usesGroup);
+  $('sorts').setAttribute('aria-label', ui.sortsGroup);
+  $('foot1').textContent = ui.foot1(dataDate());
+  $('foot2').textContent = ui.foot2;
+  $('disclaimer-text').textContent = en() ? EN.disclaimer : DISCLAIMER;
+
+  for (const id of ['from', 'to']) {
+    const picked = $(id).value;
+    $(id).replaceChildren(...[HOME, ...COUNTRIES].map((c) =>
+      el('option', { value: c.code }, en() ? `${placeName(c)} (${c.cur})` : `${placeName(c)}（${c.cur}）`)));
+    if (picked) $(id).value = picked;
+  }
+}
+
 function render() {
   const q = readQuery();
   const { c } = q;
+  const ui = t();
 
-  $('amount-label').textContent = `匯出金額（${q.from.curName}）`;
-  $('rate-line').textContent =
-    `參考匯率：1 ${c.curName}（${c.cur}）≈ ${fmt(c.rate, 2)} 新台幣（${DATA_UPDATED}的匯率，不會自動更新）`;
-  const note = q.dir === 'out' ? c.noteOut : c.noteIn;
+  $('amount-label').textContent = ui.amount(curName(q.from));
+  $('rate-line').textContent = ui.rateLine(curName(c), c.cur, fmt(c.rate, 2), dataDate());
+  const note = routeNote(c, q.dir);
   $('route-note').hidden = !note;
   $('route-note').textContent = note || '';
 
@@ -213,8 +278,8 @@ function render() {
   const off = shown.filter((r) => !r.available);
 
   $('filters').replaceChildren(
-    ...[{ id: 'all', label: '全部用途' }, ...USES].map((u) => {
-      const btn = el('button', { type: 'button', className: 'chip' }, u.label);
+    ...[{ id: 'all' }, ...USES].map((u) => {
+      const btn = el('button', { type: 'button', className: 'chip' }, u.id === 'all' ? ui.allUses : useLabel(u));
       btn.setAttribute('aria-pressed', String(u.id === state.use));
       btn.onclick = () => { state.use = u.id; render(); };
       return btn;
@@ -225,7 +290,7 @@ function render() {
     ...SORTS.map((s) => {
       const best = [...ok].sort(s.cmp)[0];
       const btn = el('button', { type: 'button', className: 'sort' },
-        el('b', {}, s.label),
+        el('b', {}, s.label()),
         el('small', {}, best ? s.top(best, q) : '—'));
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-selected', String(s.id === state.sort));
@@ -245,172 +310,174 @@ function render() {
     ...off.map((r) => card(r, q, null, best)),
   ];
   if (!items.length) {
-    items.push(el('li', { className: 'card' }, el('p', { className: 'empty' }, '這條路線目前沒有符合這個用途的匯款方式，請改選「全部用途」。')));
+    items.push(el('li', { className: 'card' }, el('p', { className: 'empty' }, ui.noMatch)));
   }
   $('results').replaceChildren(...items);
 }
 
-function cardHead(r, rank, best, q, tag = 'h2') {
+function cardHead(r, rank, best, q) {
   const head = el('div', { className: 'card-head' });
   if (rank) head.append(el('span', { className: 'rank' }, String(rank)));
-  head.append(el(tag, {}, r.m.name), el('span', { className: 'tag' }, r.m.type));
-  if (best?.receive === r) head.append(el('span', { className: 'badge' }, '收到最多'));
-  if (best?.fast === r) head.append(el('span', { className: 'badge' }, '最快'));
-  (r.info?.badges?.[q.dir] || []).forEach((b) => head.append(el('span', { className: 'badge warn' }, b)));
+  head.append(el('h2', {}, methodName(r.m)), el('span', { className: 'tag' }, methodType(r.m)));
+  if (best?.receive === r) head.append(el('span', { className: 'badge' }, t().badgeMost));
+  if (best?.fast === r) head.append(el('span', { className: 'badge' }, t().badgeFast));
+  badgesOf(r.m, q.dir).forEach((b) => head.append(el('span', { className: 'badge warn' }, b)));
   return head;
 }
 
 function metrics(r, q) {
+  const ui = t();
   const metric = (label, value, sub, cls = '') => {
     const dd = el('dd', {}, value);
     if (sub) dd.append(el('small', {}, sub));
     return el('div', { className: cls }, el('dt', {}, label), dd);
   };
   return el('dl', { className: 'metrics' },
-    metric('對方大約收到', `${fmt(r.received)} ${q.to.cur}`, `匯率約 ${fmt(r.usedRate, 3)}`, 'big'),
-    metric('總成本', `約 NT$${fmt(r.cost)}`, `手續費 ${fmt(r.fees)}＋匯差 ${fmt(r.fxCost)}`),
-    metric('到帳時間', r.cfg.speedText),
-    metric('推薦分數', r.score.toFixed(1), '滿分 10'),
+    metric(ui.receives, `${fmt(r.received)} ${q.to.cur}`, ui.rateAbout(fmt(r.usedRate, 3)), 'big'),
+    metric(ui.totalCost, ui.about(fmt(r.cost)), ui.costSplit(fmt(r.fees), fmt(r.fxCost))),
+    metric(ui.speed, cfgText(r.m, q.dir, 'speedText')),
+    metric(ui.score, r.score.toFixed(1), ui.outOf),
   );
 }
 
 function limitMsg(r) {
   return el('p', { className: 'limit-msg' },
-    r.overLimit
-      ? `這個金額超過單筆上限（約等值 NT$${fmt(r.cfg.maxAmount)}），無法使用`
-      : '金額太小，扣掉手續費後沒有剩餘');
+    r.overLimit ? t().overLimit(fmt(r.cfg.maxAmount)) : t().tooSmall);
 }
 
 function card(r, q, rank, best) {
   const comments = state.comments.filter((x) => x.method_id === r.m.id);
   const okCount = comments.filter((x) => x.ok).length;
-  const feedback = comments.length ? `${comments.length} 則回饋，${okCount} 人說能用` : '還沒有回饋';
+  const feedback = comments.length ? t().feedback(comments.length, okCount) : t().noFeedback;
 
   return el('li', { className: 'card' + (r.available ? '' : ' unavailable') },
     cardHead(r, rank, best, q),
     r.available ? metrics(r, q) : limitMsg(r),
     el('div', { className: 'card-foot' },
       el('span', {}, feedback),
-      el('a', { className: 'more', href: `#m=${r.m.id}` }, '看詳細資料 →')));
+      el('a', { className: 'more', href: `#m=${r.m.id}` }, t().more)));
 }
 
 // ---- 詳細頁 ----
 function detailView(id, rows, q) {
+  const ui = t();
   const box = el('article', { className: 'detail' },
-    el('a', { className: 'back', href: '#' }, '← 回到比較結果'));
+    el('a', { className: 'back', href: '#' }, ui.back));
   const r = rows.find((x) => x.m.id === id);
   if (!r) {
-    box.append(el('p', { className: 'empty' }, `${q.from.name} → ${q.to.name} 這條路線不能用這個匯款方式，請回到比較結果看其他選擇。`));
+    box.append(el('p', { className: 'empty' }, ui.notOnRoute(placeName(q.from), placeName(q.to))));
     return box;
   }
   const { m, cfg, info } = r;
   const c = q.c;
+  const text = (field) => cfgText(m, q.dir, field);
 
   box.append(
-    cardHead(r, null, null, q, 'h2'),
-    el('p', { className: 'route' }, `${q.from.name} → ${q.to.name}，匯出 ${fmt(q.amount)} ${q.from.cur}`),
+    cardHead(r, null, null, q),
+    el('p', { className: 'route' }, ui.routeLine(placeName(q.from), placeName(q.to), fmt(q.amount), q.from.cur)),
     r.available ? metrics(r, q) : limitMsg(r));
 
   if (info.url) {
-    const go = el('a', { className: 'cta', href: info.url, target: '_blank', rel: 'noopener' }, `前往 ${m.name} 官方網站`);
+    const go = el('a', { className: 'cta', href: info.url, target: '_blank', rel: 'noopener' }, ui.visit(methodName(m)));
     go.onclick = () => track('outlink', { ...routeData(q), method_id: m.id });
     box.append(go);
   }
-  box.append(el('p', { className: 'notice' }, DISCLAIMER));
+  box.append(el('p', { className: 'notice' }, en() ? EN.disclaimer : DISCLAIMER));
 
   const section = (title, ...children) => box.append(el('section', {}, el('h3', {}, title), ...children));
-  const p = (text) => el('p', {}, text);
+  const p = (body) => el('p', {}, body);
 
   if (r.available) {
-    const cur = q.from.cur;
-    const inCur = (twd) => (q.dir === 'in' ? `（約 ${fmt(twd / c.rate, 2)} ${cur}）` : '');
+    const local = (twd) => (q.dir === 'in' ? ui.local(fmt(twd / c.rate, 2), q.from.cur) : '');
     const steps = [
-      `匯出金額：${fmt(q.amount)} ${cur}` + (q.dir === 'in' ? `，約等於 NT$${fmt(q.twd)}` : ''),
-      `扣掉手續費：約 NT$${fmt(r.fee)}${inCur(r.fee)}`,
+      ui.stepAmount(fmt(q.amount), q.from.cur, q.dir === 'in' ? fmt(q.twd) : ''),
+      ui.stepFee(fmt(r.fee), local(r.fee)),
     ];
-    if (cfg.midFee) steps.push(`扣掉中轉銀行費用：約 NT$${fmt(cfg.midFee)}${inCur(cfg.midFee)}。這是匯款途中經手的銀行可能扣的錢，不一定每次都會扣。`);
+    if (cfg.midFee) steps.push(ui.stepMid(fmt(cfg.midFee), local(cfg.midFee)));
     steps.push(
-      `換匯：這個方式的匯率大約是 1 ${c.cur} = ${fmt(r.usedRate, 3)} 新台幣，市場匯率是 ${fmt(c.rate, 3)}，相差約 ${(r.spread * 100).toFixed(2)}%。這個價差讓你少拿約 NT$${fmt(r.fxCost)}。`,
-      `對方大約收到：${fmt(r.received)} ${q.to.cur}。總成本約 NT$${fmt(r.cost)}，占匯款金額的 ${(r.cost / q.twd * 100).toFixed(2)}%。`,
+      ui.stepFx(c.cur, fmt(r.usedRate, 3), fmt(c.rate, 3), (r.spread * 100).toFixed(2), fmt(r.fxCost)),
+      ui.stepResult(fmt(r.received), q.to.cur, fmt(r.cost), (r.cost / q.twd * 100).toFixed(2)),
     );
-    section('這個金額是怎麼算出來的', el('ol', { className: 'steps' }, ...steps.map((s) => el('li', {}, s))),
-      ...(info.fxNote ? [p(info.fxNote)] : []));
+    const fxNote = infoText(m, 'fxNote');
+    section(ui.howTitle, el('ol', { className: 'steps' }, ...steps.map((s) => el('li', {}, s))),
+      ...(fxNote ? [p(fxNote)] : []));
   }
 
-  section('到帳時間', p(cfg.speedText));
-  const uses = usesOf(r, q).map((u) => USES.find((x) => x.id === u).label);
-  if (uses.length) section('適合的用途', p(uses.join('、')));
-  section('金額限制', p(cfg.maxAmount
-    ? `單筆上限約等值新台幣 ${fmt(cfg.maxAmount)} 元。`
-    : '沒有查到固定的單筆上限，大額匯款請先向業者確認。'));
-  section('需要準備', p(cfg.needs));
-  section('優點', p(cfg.pros));
-  section('注意事項', p(cfg.cons));
-  if (info.safety) section('保障與監管', p(info.safety));
-  section('相關規定', p(RULES[q.dir]), ...(c[q.dir === 'out' ? 'noteOut' : 'noteIn'] ? [p(c[q.dir === 'out' ? 'noteOut' : 'noteIn'])] : []));
-  section('資料來源', p(cfg.source));
+  section(ui.secSpeed, p(text('speedText')));
+  const uses = usesOf(r, q).map((u) => useLabel(USES.find((x) => x.id === u)));
+  if (uses.length) section(ui.secUses, p(uses.join(ui.listSep)));
+  section(ui.secLimit, p(cfg.maxAmount ? ui.limitMax(fmt(cfg.maxAmount)) : ui.limitNone));
+  section(ui.secNeeds, p(text('needs')));
+  section(ui.secPros, p(text('pros')));
+  section(ui.secCons, p(text('cons')));
+  const safety = infoText(m, 'safety');
+  if (safety) section(ui.secSafety, p(safety));
+  const note = routeNote(c, q.dir);
+  section(ui.secRules, p(en() ? EN.rules[q.dir] : RULES[q.dir]), ...(note ? [p(note)] : []));
+  section(ui.secSource, p(text('source')));
 
   box.append(commentBox(m, q, state.comments.filter((x) => x.method_id === m.id)));
   return box;
 }
 
 function commentBox(m, q, comments) {
-  const box = el('section', { className: 'comments' }, el('h3', {}, '使用者回饋'));
+  const ui = t();
+  const box = el('section', { className: 'comments' }, el('h3', {}, ui.comments));
 
   if (comments.length) {
     box.append(el('ul', { className: 'comment-list' }, ...comments.map((x) =>
       el('li', { className: 'comment' },
         el('div', { className: 'comment-meta' },
-          el('span', { className: x.ok ? 'ok' : 'ng' }, x.ok ? '實際能用' : '遇到問題'),
+          el('span', { className: x.ok ? 'ok' : 'ng' }, x.ok ? ui.worked : ui.problem),
           el('span', {}, x.nickname),
-          el('span', {}, x.route),
-          el('span', {}, new Date(x.created_at).toLocaleDateString('zh-TW'))),
+          el('span', {}, routeLabel(x.route)),
+          el('span', {}, new Date(x.created_at).toLocaleDateString(ui.locale))),
         el('p', {}, x.body)))));
   } else {
-    box.append(el('p', { className: 'empty' }, '還沒有人留言，歡迎分享你的實際經驗。'));
+    box.append(el('p', { className: 'empty' }, ui.noComments));
   }
 
   const group = `ok-${m.id}`;
-  const name = el('input', { type: 'text', placeholder: '暱稱（可不填）', maxLength: 20 });
-  name.setAttribute('aria-label', '暱稱');
+  const name = el('input', { type: 'text', placeholder: ui.nickname, maxLength: 20 });
+  name.setAttribute('aria-label', ui.nicknameLabel);
   const yes = el('input', { type: 'radio', name: group, checked: true });
   const no = el('input', { type: 'radio', name: group });
-  const text = el('textarea', { placeholder: '例如：實際花了幾天到帳、被收了多少費用、遇到什麼狀況', maxLength: 500, required: true });
-  text.setAttribute('aria-label', '留言內容');
+  const body = el('textarea', { placeholder: ui.commentHint, maxLength: 500, required: true });
+  body.setAttribute('aria-label', ui.commentLabel);
 
-  const button = el('button', { type: 'submit' }, '送出回饋');
+  const button = el('button', { type: 'submit' }, ui.send);
   const status = el('p', { className: 'form-status' });
   status.setAttribute('role', 'status');
 
   const form = el('form', { className: 'comment-form' },
     el('div', { className: 'row' },
       name,
-      el('label', {}, yes, ' 實際能用'),
-      el('label', {}, no, ' 遇到問題')),
-    text,
+      el('label', {}, yes, ` ${ui.worked}`),
+      el('label', {}, no, ` ${ui.problem}`)),
+    body,
     button, status);
 
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const body = text.value.trim();
-    if (!body) return;
+    const content = body.value.trim();
+    if (!content) return;
     if (!navigator.onLine) {
-      status.textContent = '目前沒有網路，連上網路後才能送出留言。';
+      status.textContent = t().errOffline;
       return;
     }
     if (Date.now() - lastSent < COOLDOWN_MS) {
-      status.textContent = '剛剛才留過言，請稍等半分鐘再送出。';
+      status.textContent = t().errCooldown;
       return;
     }
     const comment = {
       method_id: m.id,
-      nickname: name.value.trim() || '匿名',
+      nickname: name.value.trim() || t().anonymous,
       ok: yes.checked,
-      body,
-      route: `${q.from.name} → ${q.to.name}`,
+      body: content,
+      route: `${q.from.code}-${q.to.code}`,
     };
     button.disabled = true;
-    status.textContent = '送出中…';
+    status.textContent = t().sending;
     try {
       await sendComment(comment);
       lastSent = Date.now();
@@ -420,7 +487,7 @@ function commentBox(m, q, comments) {
       refreshComments();
     } catch {
       button.disabled = false;
-      status.textContent = '留言沒有送出成功，請稍後再試一次。';
+      status.textContent = t().errSend;
     }
   };
 
@@ -450,11 +517,7 @@ function onPick(changed) {
 
 // ---- 啟動 ----
 function init() {
-  const options = () => [HOME, ...COUNTRIES].map((c) => el('option', { value: c.code }, `${c.name}（${c.cur}）`));
-  $('from').append(...options());
-  $('to').append(...options());
-  $('updated').textContent = DATA_UPDATED;
-  $('disclaimer-text').textContent = DISCLAIMER;
+  renderStatic();
 
   $('from').onchange = () => onPick('from');
   $('to').onchange = () => onPick('to');
@@ -465,6 +528,16 @@ function init() {
     render();
   };
   $('search').onsubmit = (e) => e.preventDefault();
+  $('lang').onclick = () => {
+    const amount = readAmount();
+    lang = en() ? 'zh' : 'en';
+    try {
+      localStorage.setItem('remit-lang', lang);
+    } catch { /* 存不下來就只在這次有效 */ }
+    renderStatic();
+    $('amount').value = amount ? fmt(amount) : '';
+    render();
+  };
 
   // 點進詳細頁、按上一頁回來，都靠網址後面的 #m=...
   addEventListener('hashchange', () => {
