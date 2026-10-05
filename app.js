@@ -168,21 +168,32 @@ function loadAnalytics() {
   document.head.append(el('script', { async: true, src: `https://www.googletagmanager.com/gtag/js?id=${GA_ID}` }));
 }
 
+// 訪客的選擇同時存在兩個地方（瀏覽器儲存空間與 Cookie），有些手機會清掉其中一個
+function readConsent() {
+  try {
+    const saved = localStorage.getItem(CONSENT_KEY);
+    if (saved) return saved;
+  } catch { /* 讀不到就改看 Cookie */ }
+  return document.cookie.match(/(?:^|; )remit-consent=(yes|no)/)?.[1] || null;
+}
+
+function saveConsent(answer) {
+  try {
+    localStorage.setItem(CONSENT_KEY, answer);
+  } catch { /* 存不下來還有 Cookie */ }
+  document.cookie = `${CONSENT_KEY}=${answer}; max-age=31536000; path=/; SameSite=Lax`;
+}
+
 // 還沒選過的人會看到同意提示；換語言時重畫一次
 function renderConsent() {
   document.querySelector('.consent')?.remove();
-  let choice = null;
-  try {
-    choice = localStorage.getItem(CONSENT_KEY);
-  } catch { /* 讀不到就當作還沒選 */ }
+  const choice = readConsent();
   if (choice === 'yes') loadAnalytics();
   if (choice) return;
 
   const ui = t();
   const decide = (answer) => {
-    try {
-      localStorage.setItem(CONSENT_KEY, answer);
-    } catch { /* 存不下來就只在這次有效 */ }
+    saveConsent(answer);
     bar.remove();
     if (answer === 'yes') loadAnalytics();
   };
