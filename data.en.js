@@ -175,6 +175,7 @@ const EN = {
     wu: {
       name: 'Western Union',
       safety: 'Western Union is a US-listed company with remittance licences worldwide. Cash cannot be recovered once collected, and scammers often ask for this channel: never send money to someone you do not know.',
+      badges: { in: ['May pay out in USD; recipient converts to TWD'] },
       out: {
         speedText: 'Minutes to 1 day',
         needs: 'ID and the recipient\'s name as in their passport; pay in TWD cash at a King\'s Town Bank counter',
@@ -186,8 +187,8 @@ const EN = {
         speedText: 'Minutes to 1 day',
         needs: 'The sender uses a local Western Union location or website; the recipient collects at King\'s Town Bank with ID and the tracking number',
         pros: 'Fast; the sender needs no bank account',
-        cons: 'Collection in Taiwan is only at King\'s Town Bank counters; the exchange rate is poorer; fees depend on country, payment method and payout method',
-        source: 'Western Union states that fees and rates vary with the amount, payment method and payout method and are only shown once the details are entered, so both the fee and the rate margin here are estimates.',
+        cons: 'Collection in Taiwan is only at King\'s Town Bank counters; the payout may be in US dollars, which the recipient then converts to TWD; fees depend on country, payment method and payout method, and take a larger share of small transfers',
+        source: 'Western Union states that fees and rates vary with the amount, payment method and payout method and are only shown once the details are entered. The figures here draw on one real transfer from the UK to Taiwan in late August 2026: £80 sent, £2.99 fee, US$107.36 received, a rate about 1.2% below the market. Fees and margins for other amounts and countries are extrapolated from that case.',
       },
     },
   },
