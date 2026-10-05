@@ -155,6 +155,47 @@ function trackSearch(q) {
   }, 2000);
 }
 
+// ---- Google Analytics：訪客按同意之後才啟動 ----
+const GA_ID = 'G-1FRMVGRN6Z';
+const CONSENT_KEY = 'remit-consent';
+
+function loadAnalytics() {
+  if (IS_LOCAL || window.dataLayer) return;
+  window.dataLayer = [];
+  window.gtag = function gtag() { window.dataLayer.push(arguments); };
+  window.gtag('js', new Date());
+  window.gtag('config', GA_ID);
+  document.head.append(el('script', { async: true, src: `https://www.googletagmanager.com/gtag/js?id=${GA_ID}` }));
+}
+
+// 還沒選過的人會看到同意提示；換語言時重畫一次
+function renderConsent() {
+  document.querySelector('.consent')?.remove();
+  let choice = null;
+  try {
+    choice = localStorage.getItem(CONSENT_KEY);
+  } catch { /* 讀不到就當作還沒選 */ }
+  if (choice === 'yes') loadAnalytics();
+  if (choice) return;
+
+  const ui = t();
+  const decide = (answer) => {
+    try {
+      localStorage.setItem(CONSENT_KEY, answer);
+    } catch { /* 存不下來就只在這次有效 */ }
+    bar.remove();
+    if (answer === 'yes') loadAnalytics();
+  };
+  const accept = el('button', { type: 'button', className: 'accept' }, ui.consentYes);
+  const decline = el('button', { type: 'button' }, ui.consentNo);
+  accept.onclick = () => decide('yes');
+  decline.onclick = () => decide('no');
+  const bar = el('div', { className: 'consent' }, el('p', {}, ui.consentText), el('div', {}, decline, accept));
+  bar.setAttribute('role', 'region');
+  bar.setAttribute('aria-label', ui.consentLabel);
+  document.body.append(bar);
+}
+
 // ---- 計算（內部一律先換算成新台幣再比較） ----
 const USD_RATE = COUNTRIES.find((x) => x.cur === 'USD').rate;
 
@@ -254,6 +295,7 @@ function renderStatic() {
   $('foot1').textContent = ui.foot1(dataDate());
   $('foot2').textContent = ui.foot2;
   $('disclaimer-text').textContent = en() ? EN.disclaimer : DISCLAIMER;
+  renderConsent();
   $('routes-title').textContent = ui.routesTitle;
   $('routes').replaceChildren(...ROUTES.map(([from, to]) =>
     el('a', { href: (page().base || '') + routePath(from.code, to.code, lang) }, ui.routeLink(placeName(from), placeName(to)))));
