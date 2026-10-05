@@ -1,0 +1,13 @@
+{
+  "name": "跨境匯款小幫手",
+  "short_name": "匯款小幫手",
+  "description": "比較各種跨境匯款方式的手續費、匯率與到帳時間",
+  "lang": "zh-Hant",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0a3d4a",
+  "theme_color": "#0b7a75",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
