@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://hsinyi96.github.io/remit-helper/sitemap.xml

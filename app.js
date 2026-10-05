@@ -225,7 +225,7 @@ const detailId = () => new URLSearchParams(location.hash.slice(1)).get('m');
 function renderStatic() {
   const ui = t();
   document.documentElement.lang = en() ? 'en' : 'zh-Hant';
-  document.title = ui.title;
+  document.title = ui.pageTitle;
   $('title').textContent = ui.title;
   $('subtitle').textContent = ui.subtitle;
   $('offline-badge').textContent = ui.offline;
