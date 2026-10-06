@@ -1,7 +1,7 @@
 // 負責把網頁存一份在裝置上，沒有網路時也能開啟。
 // 檔案有更新時，把下面的版本號加一，使用者就會拿到新版。
-const CACHE = 'remit-helper-v10';
-const FILES = ['./', 'index.html', 'style.css', 'data.js', 'data.en.js', 'i18n.js', 'app.js', 'icon.svg', 'manifest.webmanifest'];
+const CACHE = 'remit-helper-v11';
+const FILES = ['./', 'index.html', 'style.css', 'data.js', 'data.zh.js', 'data.en.js', 'i18n.js', 'app.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

@@ -20,19 +20,18 @@ const en = () => lang === 'en';
 const fmt = (n, digits = 0) =>
   n.toLocaleString(t().locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-// 資料檔裡的文字：中文在 data.js，英文在 data.en.js
-const placeName = (c) => (en() ? (c.code === HOME.code ? EN.home : EN.countries[c.code]).name : c.name);
-const curName = (c) => (en() ? (c.code === HOME.code ? EN.home : EN.countries[c.code]).curName : c.curName);
-const routeNote = (c, dir) => {
-  const key = dir === 'out' ? 'noteOut' : 'noteIn';
-  return en() ? EN.countries[c.code][key] : c[key];
-};
-const methodName = (m) => (en() ? EN.methods[m.id].name : m.name);
+// 說明文字：中文在 data.zh.js，英文在 data.en.js，兩個檔案結構相同
+const D = () => (en() ? EN : ZH);
+const place = (c) => (c.code === HOME.code ? D().home : D().countries[c.code]);
+const placeName = (c) => place(c).name;
+const curName = (c) => place(c).curName;
+const routeNote = (c, dir) => D().countries[c.code][dir === 'out' ? 'noteOut' : 'noteIn'];
+const methodName = (m) => D().methods[m.id].name;
 const methodType = (m) => (en() ? EN.types[m.type] : m.type);
-const cfgText = (m, dir, field) => (en() ? EN.methods[m.id][dir][field] : m[dir][field]);
-const infoText = (m, field) => (en() ? EN.methods[m.id][field] : METHOD_INFO[m.id]?.[field]);
-const badgesOf = (m, dir) => (en() ? EN.methods[m.id].badges?.[dir] : METHOD_INFO[m.id]?.badges?.[dir]) || [];
-const useLabel = (u) => (en() ? EN.uses[u.id] : u.label);
+const cfgText = (m, dir, field) => D().methods[m.id][dir][field];
+const infoText = (m, field) => D().methods[m.id][field];
+const badgesOf = (m, dir) => D().methods[m.id].badges?.[dir] || [];
+const useLabel = (u) => D().uses[u.id];
 const dataDate = () =>
   new Date(DATA_UPDATED).toLocaleDateString(t().locale, { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -52,7 +51,7 @@ const SORTS = [
   { id: 'popular', label: () => t().sortPopular, cmp: (a, b) => a.cfg.popularity - b.cfg.popularity, top: (r) => methodName(r.m) },
 ];
 
-const state = { sort: 'overall', use: 'all', comments: [], other: 'US' };
+const state = { sort: 'overall', use: 'all', comments: [], other: 'US', openSections: new Set() };
 
 // ---- 留言的存放（放在線上，所有人共用；這裡的金鑰本來就是公開用的） ----
 const COMMENTS_URL = 'https://stfdixjnhmfpqdiasdzd.supabase.co/rest/v1/comments';
@@ -305,7 +304,7 @@ function renderStatic() {
   $('sorts').setAttribute('aria-label', ui.sortsGroup);
   $('foot1').textContent = ui.foot1(dataDate());
   $('foot2').textContent = ui.foot2;
-  $('disclaimer-text').textContent = en() ? EN.disclaimer : DISCLAIMER;
+  $('disclaimer-text').textContent = D().disclaimer;
   renderConsent();
   $('routes-title').textContent = ui.routesTitle;
   $('routes').replaceChildren(...ROUTES.map(([from, to]) =>
@@ -455,9 +454,15 @@ function detailView(id, rows, q) {
     go.onclick = () => track('outlink', { ...routeData(q), method_id: m.id });
     box.append(go);
   }
-  box.append(el('p', { className: 'notice' }, en() ? EN.disclaimer : DISCLAIMER));
+  box.append(el('p', { className: 'notice' }, D().disclaimer));
 
-  const section = (title, ...children) => box.append(el('section', {}, el('h3', {}, title), ...children));
+  // 每個段落預設收合，點標題才展開；改金額重畫時保留展開狀態
+  const section = (key, ...children) => {
+    const block = el('details', { className: 'fold' }, el('summary', {}, ui[key]), ...children);
+    block.open = state.openSections.has(key);
+    block.ontoggle = () => state.openSections[block.open ? 'add' : 'delete'](key);
+    box.append(block);
+  };
   const p = (body) => el('p', {}, body);
 
   if (r.available) {
@@ -472,22 +477,22 @@ function detailView(id, rows, q) {
       ui.stepResult(fmt(r.received), q.to.cur, fmt(r.cost), (r.cost / q.twd * 100).toFixed(2)),
     );
     const fxNote = infoText(m, 'fxNote');
-    section(ui.howTitle, el('ol', { className: 'steps' }, ...steps.map((s) => el('li', {}, s))),
+    section('howTitle', el('ol', { className: 'steps' }, ...steps.map((s) => el('li', {}, s))),
       ...(fxNote ? [p(fxNote)] : []));
   }
 
-  section(ui.secSpeed, p(text('speedText')));
+  section('secSpeed', p(text('speedText')));
   const uses = usesOf(r, q).map((u) => useLabel(USES.find((x) => x.id === u)));
-  if (uses.length) section(ui.secUses, p(uses.join(ui.listSep)));
-  section(ui.secLimit, p(cfg.maxAmount ? ui.limitMax(fmt(cfg.maxAmount)) : ui.limitNone));
-  section(ui.secNeeds, p(text('needs')));
-  section(ui.secPros, p(text('pros')));
-  section(ui.secCons, p(text('cons')));
+  if (uses.length) section('secUses', p(uses.join(ui.listSep)));
+  section('secLimit', p(cfg.maxAmount ? ui.limitMax(fmt(cfg.maxAmount)) : ui.limitNone));
+  section('secNeeds', p(text('needs')));
+  section('secPros', p(text('pros')));
+  section('secCons', p(text('cons')));
   const safety = infoText(m, 'safety');
-  if (safety) section(ui.secSafety, p(safety));
+  if (safety) section('secSafety', p(safety));
   const note = routeNote(c, q.dir);
-  section(ui.secRules, p(en() ? EN.rules[q.dir] : RULES[q.dir]), ...(note ? [p(note)] : []));
-  section(ui.secSource, p(text('source')));
+  section('secRules', p(D().rules[q.dir]), ...(note ? [p(note)] : []));
+  section('secSource', p(text('source')));
 
   box.append(commentBox(m, q, state.comments.filter((x) => x.method_id === m.id)));
   return box;
